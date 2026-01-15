@@ -18,10 +18,10 @@ on:
           - 'false'
 
 env:
-  FB_EMAIL: $ secrets.FB_EMAIL 
-  FB_PASSWORD: $ secrets.FB_PASSWORD 
-  GOOGLE_CREDENTIALS: $ secrets.GOOGLE_CREDENTIALS 
-  SPREADSHEET_ID: $ secrets.SPREADSHEET_ID 
+  FB_EMAIL: ${{ secrets.FB_EMAIL }}
+  FB_PASSWORD: ${{ secrets.FB_PASSWORD }}
+  GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+  SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
   CDP_ENDPOINT: ws://localhost:9222
 
 jobs:
@@ -29,18 +29,6 @@ jobs:
     name: Scrape Facebook Pages
     runs-on: ubuntu-latest
     timeout-minutes: 30
-
-    services:
-      lightpanda:
-        image: lightpanda/browser:nightly
-        ports:
-          - 9222:9222
-        options: >-
-          --health-cmd "curl -sf http://localhost:9222/json/version || exit 1"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-          --health-start-period 30s
 
     steps:
       - name: 📥 Checkout repository
@@ -60,6 +48,10 @@ jobs:
       - name: 📚 Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: 🧭 Start Lightpanda
+        run: |
+          docker run -d --name lightpanda -p 9222:9222 lightpanda/browser:nightly
+
       - name: ⏳ Wait for Lightpanda to be ready
         run: |
           echo "Waiting for Lightpanda to be ready..."
@@ -73,13 +65,14 @@ jobs:
             sleep 2
           done
           echo "❌ Lightpanda failed to start"
+          docker logs lightpanda || true
           exit 1
 
       - name: 🚀 Run scraper
         run: pnpm start
         env:
           NODE_ENV: production
-          DEBUG: $ inputs.debug == 'true' && 'true' || '' 
+          DEBUG: ${{ inputs.debug }}
 
       - name: 📊 Job summary
         if: always()
@@ -87,14 +80,14 @@ jobs:
           echo "## 📊 Scraper Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **Run time:** $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
-          echo "- **Trigger:** $ github.event_name " >> $GITHUB_STEP_SUMMARY
-          echo "- **Status:** $ job.status " >> $GITHUB_STEP_SUMMARY
+          echo "- **Trigger:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
 
       - name: 📤 Upload logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: error-logs-$ github.run_id 
+          name: error-logs-${{ github.run_id }}
           path: |
             *.log
             logs/
