@@ -1,0 +1,102 @@
+name: Facebook Opportunities Scraper
+
+on:
+  # Schedule: ทุกวัน 05:30 เวลาไทย (22:30 UTC วันก่อนหน้า)
+  schedule:
+    - cron: '30 22 * * *'
+  
+  # Manual trigger
+  workflow_dispatch:
+    inputs:
+      debug:
+        description: 'Enable debug mode'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+
+env:
+  FB_EMAIL: $ secrets.FB_EMAIL 
+  FB_PASSWORD: $ secrets.FB_PASSWORD 
+  GOOGLE_CREDENTIALS: $ secrets.GOOGLE_CREDENTIALS 
+  SPREADSHEET_ID: $ secrets.SPREADSHEET_ID 
+  CDP_ENDPOINT: ws://localhost:9222
+
+jobs:
+  scrape:
+    name: Scrape Facebook Pages
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      lightpanda:
+        image: lightpanda/browser:nightly
+        ports:
+          - 9222:9222
+        options: >-
+          --health-cmd "curl -sf http://localhost:9222/json/version || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+          --health-start-period 30s
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 📦 Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 9
+
+      - name: 🟢 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: 📚 Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: ⏳ Wait for Lightpanda to be ready
+        run: |
+          echo "Waiting for Lightpanda to be ready..."
+          for i in {1..30}; do
+            if curl -sf http://localhost:9222/json/version > /dev/null 2>&1; then
+              echo "✅ Lightpanda is ready!"
+              curl -s http://localhost:9222/json/version | jq .
+              exit 0
+            fi
+            echo "Attempt $i/30 - waiting..."
+            sleep 2
+          done
+          echo "❌ Lightpanda failed to start"
+          exit 1
+
+      - name: 🚀 Run scraper
+        run: pnpm start
+        env:
+          NODE_ENV: production
+          DEBUG: $ inputs.debug == 'true' && 'true' || '' 
+
+      - name: 📊 Job summary
+        if: always()
+        run: |
+          echo "## 📊 Scraper Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Run time:** $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "- **Trigger:** $ github.event_name " >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** $ job.status " >> $GITHUB_STEP_SUMMARY
+
+      - name: 📤 Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: error-logs-$ github.run_id 
+          path: |
+            *.log
+            logs/
+          retention-days: 7
+          if-no-files-found: ignore
